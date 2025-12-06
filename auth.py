@@ -11,6 +11,7 @@ load_dotenv()
 API_URL = os.getenv("LAMBDA_URL")
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
 
 def api_call(action, data={}):
     if not API_URL:
@@ -35,7 +36,7 @@ def api_call(action, data={}):
                 data=json_data,
                 headers={'Content-Type': 'application/json'}
             )
-            SigV4Auth(credentials, 'lambda', 'eu-north-1').add_auth(request)
+            SigV4Auth(credentials, 'lambda', AWS_REGION).add_auth(request)
             
             r = requests.post(API_URL, data=json_data, headers=dict(request.headers))
         else:

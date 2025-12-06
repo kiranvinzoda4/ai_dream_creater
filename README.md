@@ -13,12 +13,24 @@ Clean Streamlit app with tabbed login/register and user profiles.
 
 ### 2. Frontend Setup
 ```bash
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+venv\Scripts\activate  # Windows
+# source venv/bin/activate  # Linux/Mac
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Setup environment variables
 cp .env.example .env
 # Edit .env and add:
 # - Lambda Function URL
 # - AWS Access Key ID
 # - AWS Secret Access Key
+
+# Run the app
 streamlit run app.py
 ```
 
