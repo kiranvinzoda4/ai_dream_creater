@@ -13,8 +13,6 @@ dreams_table = dynamodb.Table("dream_videos")
 s3 = boto3.client("s3", region_name="us-east-1")
 S3_BUCKET = os.environ.get("S3_BUCKET", "dream-creator-images")
 
-bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
-
 def response(body, code=200):
     return {
         "statusCode": code,
@@ -169,8 +167,6 @@ def lambda_handler(event, context):
             if not character.get("image_urls"):
                 return response({"error": "No character images found"}, 400)
 
-            # Use demo video for now
-            job_id = ""
             video_url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
             status = "demo"
 
@@ -183,7 +179,6 @@ def lambda_handler(event, context):
                 "video_s3_uri": "",
                 "video_url": video_url,
                 "status": status,
-                "job_id": job_id,
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
             })
 
@@ -196,55 +191,6 @@ def lambda_handler(event, context):
 
         except Exception as e:
             print(f"Dream creation failed: {str(e)}")
-            return response({"error": str(e)}, 500)
-
-    elif action == "check_dream_status":
-        dream_id = body.get("dream_id")
-        
-        try:
-            dream_item = dreams_table.get_item(Key={"dream_id": dream_id})
-            if "Item" not in dream_item:
-                return response({"error": "Dream not found"}, 404)
-            
-            dream = dream_item["Item"]
-            return response({"success": True, "dream": dream})
-            
-        except Exception as e:
-            return response({"error": str(e)}, 500)eo_url = s3.generate_presigned_url(
-                                "get_object",
-                                Params={"Bucket": S3_BUCKET, "Key": video_key},
-                                ExpiresIn=3600
-                            )
-                            
-                            # Update dream status
-                            dreams_table.update_item(
-                                Key={"dream_id": dream_id},
-                                UpdateExpression="SET #status = :status, video_url = :url",
-                                ExpressionAttributeNames={"#status": "status"},
-                                ExpressionAttributeValues={
-                                    ":status": "completed",
-                                    ":url": video_url
-                                }
-                            )
-                            
-                            dream["status"] = "completed"
-                            dream["video_url"] = video_url
-                    
-                    elif job_response["status"] == "Failed":
-                        dreams_table.update_item(
-                            Key={"dream_id": dream_id},
-                            UpdateExpression="SET #status = :status",
-                            ExpressionAttributeNames={"#status": "status"},
-                            ExpressionAttributeValues={":status": "failed"}
-                        )
-                        dream["status"] = "failed"
-                        
-                except Exception as job_error:
-                    print(f"Job check failed: {str(job_error)}")
-            
-            return response({"success": True, "dream": dream})
-            
-        except Exception as e:
             return response({"error": str(e)}, 500)
 
     elif action == "get_dreams":
