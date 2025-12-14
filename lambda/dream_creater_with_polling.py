@@ -5,19 +5,15 @@ from datetime import datetime
 import uuid
 import base64
 
-# DynamoDB setup
-dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_DEFAULT_REGION_NAME", "us-east-1"))
+dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
 users_table = dynamodb.Table("dream_users")
 characters_table = dynamodb.Table("dream_characters")
 dreams_table = dynamodb.Table("dream_videos")
 
-# S3 setup - bucket is actually in us-east-1
 s3 = boto3.client("s3", region_name="us-east-1")
 S3_BUCKET = os.environ.get("S3_BUCKET", "dream-creator-images")
 
-# Bedrock setup
 bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
-
 
 def response(body, code=200):
     return {
@@ -30,7 +26,6 @@ def response(body, code=200):
             "Access-Control-Allow-Methods": "POST,GET,OPTIONS"
         }
     }
-
 
 def lambda_handler(event, context):
     if event.get("requestContext", {}).get("http", {}).get("method") == "OPTIONS":
@@ -107,7 +102,6 @@ def lambda_handler(event, context):
             for i, img_b64 in enumerate(images[:3]):
                 raw = base64.b64decode(img_b64)
                 key = f"characters/{email}/{char_id}/img_{i}.jpg"
-
                 s3.put_object(Bucket=S3_BUCKET, Key=key, Body=raw, ContentType="image/jpeg")
                 uploaded_keys.append(key)
 
@@ -147,7 +141,6 @@ def lambda_handler(event, context):
                         urls.append(url)
                     except Exception as e:
                         print(f"Error generating presigned URL for {key}: {str(e)}")
-                        # Skip broken URLs
                         continue
                 char["image_urls"] = urls
 
@@ -161,7 +154,7 @@ def lambda_handler(event, context):
         character_id = body.get("character_id")
         prompt = body.get("prompt")
 
-        if not email or not character_id or not prompt:
+        if not email or not character_id:
             return response({"error": "Missing fields"}, 400)
 
         dream_id = str(uuid.uuid4())
@@ -176,62 +169,21 @@ def lambda_handler(event, context):
             if not character.get("image_urls"):
                 return response({"error": "No character images found"}, 400)
 
-            # Get character image
-            img_key = character["image_urls"][0]
-            img_obj = s3.get_object(Bucket=S3_BUCKET, Key=img_key)
-            img_raw = img_obj["Body"].read()
-            img_b64 = base64.b64encode(img_raw).decode("utf-8")
-
-            # Nova Reel request (cross-region call to us-east-1)
-            nova_body = {
-                "inputText": prompt,
-                "images": [
-                    {
-                        "format": "image/jpeg",
-                        "source": "base64",
-                        "data": img_b64
-                    }
-                ],
-                "video_generation_config": {
-                    "durationSeconds": 2,
-                    "dimension": "640x360",
-                    "fps": 12
-                }
-            }
-
-            response_nova = bedrock.invoke_model(
-                modelId="amazon.nova-reel-v1:0",
-                body=json.dumps(nova_body),
-                contentType="application/json",
-                accept="application/json"
-            )
-
-            response_json = json.loads(response_nova["body"].read())
-            video_s3_uri = response_json.get("outputVideo")
-
-            if not video_s3_uri:
-                raise Exception("outputVideo missing in response")
-
-            # Extract bucket + key from S3 URI
-            bucket_name, key_path = video_s3_uri.replace("s3://", "").split("/", 1)
-
-            # Generate presigned URL
-            video_url = s3.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": bucket_name, "Key": key_path},
-                ExpiresIn=3600
-            )
-            status = "completed"
+            # Use demo video for now
+            job_id = ""
+            video_url = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+            status = "demo"
 
             dreams_table.put_item(Item={
                 "dream_id": dream_id,
                 "email": email,
                 "character_id": character_id,
                 "character_name": character.get("name", "Unknown"),
-                "prompt": prompt,
-                "video_s3_uri": video_s3_uri,
+                "prompt": prompt if prompt else "",
+                "video_s3_uri": "",
                 "video_url": video_url,
                 "status": status,
+                "job_id": job_id,
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
             })
 
@@ -243,44 +195,79 @@ def lambda_handler(event, context):
             })
 
         except Exception as e:
-            print("Nova Reel failed:", str(e))
+            print(f"Dream creation failed: {str(e)}")
+            return response({"error": str(e)}, 500)
+
+    elif action == "check_dream_status":
+        dream_id = body.get("dream_id")
+        
+        try:
+            dream_item = dreams_table.get_item(Key={"dream_id": dream_id})
+            if "Item" not in dream_item:
+                return response({"error": "Dream not found"}, 404)
             
-            # Fallback to sample video
-            video_url = "https://sample-videos.com/zip/10/mp4/SampleVideo_360x240_1mb.mp4"
-            status = "sample"
-
-            dreams_table.put_item(Item={
-                "dream_id": dream_id,
-                "email": email,
-                "character_id": character_id,
-                "character_name": character.get("name", "Unknown"),
-                "prompt": prompt,
-                "video_url": video_url,
-                "status": status,
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
-            })
-
-            return response({
-                "success": True,
-                "dream_id": dream_id,
-                "video_url": video_url,
-                "status": status
-            })
+            dream = dream_item["Item"]
+            return response({"success": True, "dream": dream})
+            
+        except Exception as e:
+            return response({"error": str(e)}, 500)eo_url = s3.generate_presigned_url(
+                                "get_object",
+                                Params={"Bucket": S3_BUCKET, "Key": video_key},
+                                ExpiresIn=3600
+                            )
+                            
+                            # Update dream status
+                            dreams_table.update_item(
+                                Key={"dream_id": dream_id},
+                                UpdateExpression="SET #status = :status, video_url = :url",
+                                ExpressionAttributeNames={"#status": "status"},
+                                ExpressionAttributeValues={
+                                    ":status": "completed",
+                                    ":url": video_url
+                                }
+                            )
+                            
+                            dream["status"] = "completed"
+                            dream["video_url"] = video_url
+                    
+                    elif job_response["status"] == "Failed":
+                        dreams_table.update_item(
+                            Key={"dream_id": dream_id},
+                            UpdateExpression="SET #status = :status",
+                            ExpressionAttributeNames={"#status": "status"},
+                            ExpressionAttributeValues={":status": "failed"}
+                        )
+                        dream["status"] = "failed"
+                        
+                except Exception as job_error:
+                    print(f"Job check failed: {str(job_error)}")
+            
+            return response({"success": True, "dream": dream})
+            
+        except Exception as e:
+            return response({"error": str(e)}, 500)
 
     elif action == "get_dreams":
         email = body.get("email")
 
-        res = dreams_table.scan(
-            FilterExpression="email = :e",
-            ExpressionAttributeValues={":e": email}
-        )
+        try:
+            res = dreams_table.scan(
+                FilterExpression="email = :e",
+                ExpressionAttributeValues={":e": email}
+            )
 
-        return response({"success": True, "dreams": res["Items"]})
+            return response({"success": True, "dreams": res.get("Items", [])})
+            
+        except Exception as e:
+            return response({"error": str(e)}, 500)
 
     elif action == "delete_dream":
         dream_id = body.get("dream_id")
-        dreams_table.delete_item(Key={"dream_id": dream_id})
-        return response({"success": True})
+        try:
+            dreams_table.delete_item(Key={"dream_id": dream_id})
+            return response({"success": True})
+        except Exception as e:
+            return response({"error": str(e)}, 500)
 
     else:
         return response({"error": "Unknown action"}, 400)
